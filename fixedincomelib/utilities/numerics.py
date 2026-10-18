@@ -98,6 +98,10 @@ class Interpolator1DPCP(Interpolator1D):
 
     With axis1 = [1, 3, 5, 7], values = [3, 4, 5, 6]:
         f(0.5) = 3, f(1) = 3, f(1.5) = 4, f(3) = 4, f(5.5) = 6, f(8) = 6
+
+    Node i "owns" the interval (axis1[i-1], axis1[i]]. With FLAT
+    extrapolation, node 0 also owns everything to the left of axis1[0],
+    and the last node owns everything to the right of axis1[-1].
     """
 
     def __init__(self, axis1: np.ndarray, values: np.ndarray,
@@ -107,21 +111,44 @@ class Interpolator1DPCP(Interpolator1D):
                          extrapolation_method)
         assert self.extrap_method_ == ExtrapMethod.FLAT
 
+    def _index(self, x: float) -> int:
+        """Index of the node whose value applies at x (left-continuous)."""
+        # side='left' returns the first i with axis1[i] >= x, so a point
+        # exactly on a node uses that node's value (left-continuity).
+        i = int(np.searchsorted(self.axis1_, x, side='left'))
+        return min(i, self.length_ - 1)  # flat extrapolation on the right
+
     def interpolate(self, x: float) -> float:
-        #TODO
-        pass
+        return float(self.values_[self._index(x)])
 
     def integrate(self, start_x: float, end_x: float) -> float:
-        #TODO
-        pass
+        # The integral is linear in the node values: sum_i values[i] * w_i,
+        # where w_i is the length of [start_x, end_x] inside node i's interval.
+        weights = self.gradient_of_integrated_value_wrt_ordinate(start_x, end_x)
+        return float(np.dot(self.values_, weights))
 
     def gradient_wrt_ordinate(self, x: float) -> np.ndarray:
-        #TODO
-        pass
+        # f(x) equals exactly one node value, so the gradient is one-hot.
+        grad = np.zeros(self.length_)
+        grad[self._index(x)] = 1.0
+        return grad
 
     def gradient_of_integrated_value_wrt_ordinate(self, start_x: float, end_x: float) -> np.ndarray:
-        #TODO
-        pass
+        # Handle reversed limits: integral from b to a = -(integral from a to b).
+        sign = 1.0
+        a, b = start_x, end_x
+        if b < a:
+            a, b = b, a
+            sign = -1.0
+
+        weights = np.zeros(self.length_)
+        for i in range(self.length_):
+            lower = -np.inf if i == 0 else self.axis1_[i - 1]
+            upper = np.inf if i == self.length_ - 1 else self.axis1_[i]
+            overlap = min(b, upper) - max(a, lower)
+            if overlap > 0:
+                weights[i] = overlap
+        return sign * weights
 
 
 
